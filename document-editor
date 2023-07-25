@@ -1,0 +1,673 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="author" content="Softnio">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="shortcut icon" href="images/favicon.png">
+    <title>Online Editor - Amto AI - World's First AI Legal Assistant for Drafting Powered by GPT3.</title>
+    <link rel="stylesheet" href="assets/css/theme.css">
+    <link rel="stylesheet" href="assets/css/style-s2.css">
+    <link rel="stylesheet" href="ckeditor5/sample/styles.css">
+    <script src="https://www.gstatic.com/firebasejs/9.14.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/9.14.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
+    <script src="assets/js/init.js"></script>
+    <script type='text/javascript'>
+        window.smartlook || (function (d) {
+            var o = smartlook = function () { o.api.push(arguments) }, h = d.getElementsByTagName('head')[0];
+            var c = d.createElement('script'); o.api = new Array(); c.async = true; c.type = 'text/javascript';
+            c.charset = 'utf-8'; c.src = 'https://web-sdk.smartlook.com/recorder.js'; h.appendChild(c);
+        })(document);
+        smartlook('init', '4829cfbd861bcfbc376525568b1a57ed7b7e8894', { region: 'eu' });
+    </script>
+    <script type="text/javascript">
+        function initApp() {
+            document.getElementById('logout').addEventListener('click', handleLogout, false);
+            document.getElementById("run").onclick = run;
+            document.getElementById("regenerate").onclick = run;
+            document.getElementById("copy").onclick = copyResult;
+            document.getElementById("closepopup").onclick = closePopup;
+            document.getElementById('copyContext').addEventListener('click', copyContext, false);
+            document.getElementById('usJurisdiction').addEventListener('click', changeJurisdiction, false);
+            document.getElementById('inJurisdiction').addEventListener('click', changeJurisdiction, false);
+            document.getElementById('limitedScope').addEventListener('click', changeScope, false);
+            document.getElementById('comprehensiveScope').addEventListener('click', changeScope, false);
+            for (let step = 1; step <= 6; step++) {
+                document.getElementById("option" + step).onclick = setOption;
+            }
+
+            window.jurisdiction = "US"
+            window.scope = "limited"
+
+
+            firebase.auth().onAuthStateChanged(function (user) {
+                if (user && user.emailVerified) {
+                    document.getElementById('loggedOutMenu').style.display = "none";
+                    document.getElementById('loggedInMenu').style.display = "block";
+                    db = firebase.firestore();
+                    const uid = user.uid;
+                    db.collection("users").doc(uid).get().then((userObj) => {
+                        if (userObj && userObj.data()) {
+                            document.getElementById('tokenCount').innerHTML = userObj.data()["tokens"];
+                        }
+                    });
+                } else {
+                    window.location.href = "/login.html"
+                }
+            });
+
+
+        }
+
+        function setOption() {
+            const draftCommand = document.getElementById("draftCommand");
+            draftCommand.value = this.getElementsByTagName("span")[0].textContent.replace(/[\n\r]/g, '').replace(/[\s]{2,}/g, ' ').trim();
+        }
+        function changeScope() {
+            const limitedScope = document.getElementById("limitedScope");
+            const comprehensiveScope = document.getElementById("comprehensiveScope");
+            if (this.id == "limitedScope") {
+                limitedScope.classList.remove("text-bg-primary-soft")
+                limitedScope.classList.add("text-bg-primary")
+                comprehensiveScope.classList.remove("text-bg-primary")
+                comprehensiveScope.classList.add("text-bg-primary-soft")
+                window.scope = "limited"
+            } else if (this.id == "comprehensiveScope") {
+                comprehensiveScope.classList.remove("text-bg-primary-soft")
+                comprehensiveScope.classList.add("text-bg-primary")
+                limitedScope.classList.remove("text-bg-primary")
+                limitedScope.classList.add("text-bg-primary-soft")
+                window.scope = "comprehensive"
+            }
+        }
+
+        async function copyContext() {
+            const context = document.getElementById("context");
+            const selection = window.editor.model.document.selection;
+            const range = selection.getFirstRange();
+            let contextText = "";
+            for (const item of range.getItems()) {
+                if (item.data !== undefined) {
+                    contextText += " " + item.data;
+                }
+            }
+            context.value = contextText;
+            window.editor.editing.view.focus();
+        }
+        async function run() {
+            var response = "Empty";
+            document.getElementsByClassName("blocker")[0].style.display = "block";
+            document.getElementsByClassName("blocker1")[0].style.display = "none";
+            const command = document.getElementById("draftCommand").value;
+            const jurisdiction = window.jurisdiction;
+            const draftGPTPrompt = command;
+            const context = document.getElementById("context").value;
+            const scope = window.scope;
+            response = await callApi(jurisdiction, command, context, scope);
+
+            if (response) {
+                document.getElementById('tokenCount').innerHTML = response.remainingTokens
+                document.getElementById('result').innerHTML = response.result
+                document.getElementsByClassName("blocker")[0].style.display = "none";
+                document.getElementsByClassName("blocker1")[0].style.display = "block";
+            }
+        }
+
+        function copyResult() {
+            navigator.clipboard.writeText(document.getElementById('result').innerHTML).then(function () {
+                document.getElementsByClassName("blocker1")[0].style.display = "none";
+                var x = document.getElementById("snackbar");
+                x.className = "show";
+                setTimeout(function () { x.className = x.className.replace("show", ""); }, 3000);
+            }, function (err) {
+                console.error('Async: Could not copy text: ', err);
+            });
+        }
+
+        function closePopup() {
+            document.getElementsByClassName("blocker1")[0].style.display = "none";
+            var x = document.getElementById("snackbar");
+            x.className = "show";
+            setTimeout(function () { x.className = x.className.replace("show", ""); }, 3000);
+        }
+
+        const callApi = async (jurisdiction, command, context, scope) => {
+            const prodApiUrl = "https://us-central1-amtoai.cloudfunctions.net/getDraft";
+            const devApiUrl = "http://localhost:5001/amtoai/us-central1/getDraft";
+            let json;
+            try {
+                const response = await fetch(prodApiUrl, {
+                    method: 'POST',
+                    body: JSON.stringify({
+                        "jurisdiction": jurisdiction,
+                        "command": command,
+                        "context": context,
+                        "scope": scope,
+                        "user": firebase.auth().currentUser.uid,
+                        "client": "webUI"
+                    }),
+                    headers: {
+                        'Accept': 'application/json',
+                        'Content-Type': 'application/json'
+                    }
+                });
+                if (response?.ok) {
+                    json = await response.json();
+                    if (json.result) {
+                        handleError(null);
+                        return json;
+                    } else {
+                        handleError(json.error);
+                        return null;
+                    }
+
+                } else {
+                    handleError(`HTTP Response Code: ${response?.status}`);
+                    return null;
+                }
+            } catch (error) {
+                if (error instanceof SyntaxError) {
+                    handleError(error);
+                } else {
+                    handleError(error);
+                }
+                return null;
+            }
+
+            if (json) {
+                return json.result;
+            }
+
+        }
+        window.onload = function () {
+            initApp();
+        };
+    </script>
+
+    <!-- Google tag (gtag.js) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-GM85JGYHXY"></script>
+    <script>
+        window.dataLayer = window.dataLayer || [];
+        function gtag() { dataLayer.push(arguments); }
+        gtag('js', new Date());
+
+        gtag('config', 'G-GM85JGYHXY');
+    </script>
+
+</head>
+
+<body class="nk-body" data-menu-collapse="lg" data-editor="DecoupledDocumentEditor" data-collaboration="false"
+    data-revision-history="false">
+    <div class="nk-app-root">
+        <header class="nk-header bg-darker is-dark has-mask">
+            <div class="nk-mask bg-pattern-dot-white-sm"></div>
+            <div class="nk-header-main nk-menu-main is-transparent will-shrink on-dark ignore-mask">
+                <div class="container">
+                    <div class="nk-header-wrap">
+                        <div class="nk-header-logo">
+                            <a href="index.html" class="logo-link">
+                                <div class="logo-wrap">
+                                    <img class="logo-img logo-light" src="images/logo.png" srcset="images/logo2x.png 2x"
+                                        alt="">
+                                    <img class="logo-img logo-dark" src="images/logo-dark.png"
+                                        srcset="images/logo-dark2x.png 2x" alt="">
+                                </div>
+                            </a>
+                        </div><!-- .nk-header-logo -->
+                        <div class="nk-header-toggle">
+                            <button class="btn btn-light btn-icon header-menu-toggle">
+                                <em class="icon ni ni-menu"></em>
+                            </button>
+                        </div>
+                        <nav class="nk-header-menu nk-menu">
+                            <ul class="nk-menu-list me-auto">
+
+                            </ul><!-- .nk-menu-list -->
+                            <div id="loggedInMenu" class="hideMe">
+                                <ul class="nk-menu-buttons flex-lg-row-reverse">
+                                    <li><button class="btn btn-primary rounded-pill" id="logout">Logout</button></li>
+                                </ul><!-- .nk-menu-buttons -->
+                            </div>
+                            <div id="loggedOutMenu">
+                                <ul class="nk-menu-buttons flex-lg-row-reverse">
+                                    <li class="px-0"><a href="/login.html" class="btn btn-primary rounded-pill">Login
+                                        </a></li>
+                                    <li><a href="/register.html" class="btn btn-outline-primary rounded-pill ">Get
+                                            Started</a></li>
+                                    </li>
+                                </ul><!-- .nk-menu-buttons -->
+                            </div>
+                        </nav><!-- .nk-header-menu -->
+                    </div><!-- .nk-header-wrap -->
+                </div><!-- .container -->
+            </div><!-- .nk-header-main -->
+        </header><!-- .nk-header -->
+        <main class="nk-pages">
+            <div id="snackbar">Results copied to clipboard</div>
+            <div id="content" class="blocker1">
+                <div class="loader">
+                    <div id="" class="">
+                        <div class="">
+                            <div class="">
+                                <div class="">
+                                    <!-- logo for middle here -->
+                                    <div class="card border-0 shadow-sm rounded-4">
+                                        <div class="card-body">
+                                            <div class="block-text text-center">
+                                                <div style="height: 500px; width: 400px;">
+                                                    <textarea disabled id="result" style="width: 100%; height: 100%;">
+                                                    </textarea>
+                                                </div>
+                                                <div class="col-12 mt-4">
+                                                    <div class="form-group">
+                                                        <button class="btn btn-success rounded-pill" id="copy">Copy
+                                                        </button>
+                                                        <button class="btn btn-info rounded-pill"
+                                                            id="regenerate">Regenerate
+                                                        </button>
+                                                        <button class="btn btn-danger rounded-pill"
+                                                            id="closepopup">Close
+                                                        </button>
+                                                    </div>
+                                                </div><!-- .col -->
+                                            </div>
+                                        </div>
+                                    </div><!-- .card -->
+                                </div>
+                            </div>
+                        </div><!-- .container -->
+                        <!-- footer for middle -->
+                    </div><!-- .section -->
+                </div>
+            </div>
+            <section class="section section-bottom-2 section-top-0 has-shape has-mask">
+                <div class="nk-mask bg-gradient-a"></div>
+                <div class="nk-mask bg-pattern-dot-sm"></div>
+                <div class="container">
+                    <div class="section-head">
+                        <div class="row justify-content-center text-center">
+                            <div class="col-xl-8 mt-6">
+                                <h2 class="title">Document Editor</h2>
+                            </div>
+                        </div>
+                    </div><!-- .section-head -->
+                    <div class="section-content">
+                        <div class="row g-gs justify-content-center justify-content-lg-between">
+                            <div class="col-md-12 col-lg-7 col-xl-8 text-center">
+                                <div class="ck-editor editor__editable">
+                                    <div class="document-editor__toolbar"></div>
+                                    <div class="row row-editor">
+                                        <div class="editor">
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-12 col-lg-5 col-xl-4  px-0 py-0">
+                                <div class=" p-0 m-0 border rounded-3 bg-light bg-opacity-60"
+                                    style="height: 966px!important;">
+                                    <div class="nk-body">
+
+                                        <div class="blocker">
+                                            <div class="loader">
+                                                <div class="loading">
+                                                </div>
+                                                <span class="loader-text text-center">
+                                                    Don't Worry! Amto is working hard to generate your results.
+                                                    <br />This may take upto 60 Seconds.
+                                                </span>
+                                            </div>
+                                        </div>
+                                        <div class="">
+                                            <main class="nk-pages">
+                                                <div class="d-flex flex-column has-mask">
+                                                    <div class="nk-mask "></div>
+                                                    <div class="text-center mt-4 mb-4">
+                                                        <a class="logo-link">
+                                                            <div class="logo-wrap">
+                                                                <img class="logo-img logo-dark"
+                                                                    src="images/logo-dark.png" alt="">
+                                                            </div>
+                                                        </a>
+                                                    </div>
+                                                    <div id="app-body">
+                                                        <div class="container">
+                                                            <div class="row g-gs justify-content-center">
+                                                                <div class="col-sm-12">
+                                                                    <div class="card border-0 shadow-sm rounded-3">
+                                                                        <div class="card-body py-1 px-3">
+                                                                            <div class="row g-4">
+                                                                                <div
+                                                                                    class="d-flex flex-wrap justify-content-between">
+                                                                                    <span id="tokenCount"
+                                                                                        class="text-primary fw-bold text-bold m-0 p-0 fs-5">0</span>
+                                                                                    <em id="logoutIcon"
+                                                                                        class="btn text-base fs-3 ni ni-signout m-0 p-0"></em>
+                                                                                </div>
+                                                                                <!-- .col -->
+                                                                            </div>
+                                                                            <!-- .row -->
+                                                                        </div>
+                                                                    </div><!-- .card -->
+                                                                </div>
+                                                                <div class="col-sm-12 mt-2">
+                                                                    <div class="card border-0 shadow-sm rounded-3">
+                                                                        <div class="card-body p-4">
+                                                                            <div class="row g-4">
+                                                                                <div class="col- px-0 mt-3">
+                                                                                    <div
+                                                                                        class="form-group border bg-white rounded-3 py-2 px-1">
+                                                                                        <div class="d-flex mb-1">
+                                                                                            <em
+                                                                                                class="icon text-base fs-3 mb-0 me-1 ni ni-network"></em>
+                                                                                            <span
+                                                                                                class="fw-bold">Jurisdiction</span>
+                                                                                        </div>
+                                                                                        <div role="button"
+                                                                                            id="usJurisdiction"
+                                                                                            class="badge text-bg-primary text-tracking-1 rounded-pill px-3 py-2 my-1">
+                                                                                            <span>United States of
+                                                                                                America</span>
+                                                                                        </div>
+                                                                                        <div role="button"
+                                                                                            id="inJurisdiction"
+                                                                                            class="badge text-bg-primary-soft border-1 text-tracking-1 rounded-pill px-3 py-2 my-1">
+                                                                                            <span>India</span>
+                                                                                        </div>
+                                                                                        <div id="more"
+                                                                                            class="badge text-bg-success-soft-outline text-tracking-1 rounded-pill px-3 py-2 my-1">
+                                                                                            <span>more Jurisdictions
+                                                                                                comming
+                                                                                                soon...</span>
+                                                                                        </div>
+                                                                                    </div>
+                                                                                </div>
+                                                                                <div class="col-12 px-0 mt-3">
+                                                                                    <span
+                                                                                        class="fw-bold">Instructions</span>
+                                                                                    <label id="draft-search"
+                                                                                        class="d-flex align-items-center border rounded-3 py-1 px-3 mt-1 bg-white">
+                                                                                        <em
+                                                                                            class="icon me-3 fs-3 ni ni-edit-alt-fill"></em>
+                                                                                        <input type="text"
+                                                                                            id="draftCommand"
+                                                                                            class="form-control form-control-lg form-control-plaintext"
+                                                                                            placeholder="Draft a ...">
+                                                                                    </label>
+
+
+
+                                                                                </div>
+                                                                                <!-- .col -->
+                                                                                <div class="col-12 mt-5">
+                                                                                    <div class="section-actions">
+                                                                                        <ul
+                                                                                            class="btn-list btn-list-inline ">
+                                                                                            <li class="px-1 py-1 mt-0">
+                                                                                                <div role="button"
+                                                                                                    id="option1"
+                                                                                                    class="badge text-bg-primary-soft text-tracking-1 px-2 py-2">
+                                                                                                    <span>Indemnity
+                                                                                                        clause</span>
+                                                                                                </div>
+                                                                                            </li>
+                                                                                            <li class="px-1 py-1 mt-0">
+                                                                                                <div role="button"
+                                                                                                    id="option2"
+                                                                                                    class="badge text-bg-primary-soft text-tracking-1 px-2 py-2">
+                                                                                                    <span>Exclusion
+                                                                                                        of
+                                                                                                        Liability</span>
+                                                                                                </div>
+                                                                                            </li>
+                                                                                            <li class="px-1 py-1 mt-0">
+                                                                                                <div role="button"
+                                                                                                    id="option3"
+                                                                                                    class="badge text-bg-primary-soft text-tracking-1 px-2 py-2">
+                                                                                                    <span>Dispute
+                                                                                                        Resolution
+                                                                                                        Clause</span>
+                                                                                                </div>
+                                                                                            </li>
+                                                                                            <li class="px-1 py-1 mt-0">
+                                                                                                <div role="button"
+                                                                                                    id="option4"
+                                                                                                    class="badge text-bg-primary-soft text-tracking-1 px-2 py-2">
+                                                                                                    <span>Confidentiality
+                                                                                                        clause</span>
+                                                                                                </div>
+                                                                                            </li>
+                                                                                            <li class="px-1 py-1 mt-0">
+                                                                                                <div role="button"
+                                                                                                    id="option5"
+                                                                                                    class="badge text-bg-primary-soft text-tracking-1 px-2 py-2">
+                                                                                                    <span>Force
+                                                                                                        majeure
+                                                                                                        clause</span>
+                                                                                                </div>
+                                                                                            </li>
+                                                                                            <li class="px-1 py-1 mt-0">
+                                                                                                <div role="button"
+                                                                                                    id="option6"
+                                                                                                    class="badge text-bg-primary-soft text-tracking-1 px-2 py-2">
+                                                                                                    <span>Severability
+                                                                                                        clause</span>
+                                                                                                </div>
+                                                                                            </li>
+                                                                                        </ul>
+                                                                                    </div>
+                                                                                </div>
+
+
+                                                                                <!-- .col -->
+                                                                                <div class="col-12 px-0 mt-3">
+                                                                                    <span class="fw-bold">Context</span>
+                                                                                    <label id="context-label"
+                                                                                        class="d-flex align-items-center border rounded-3 py-1 px-2 mt-1 bg-white">
+                                                                                        <em id="copyContext"
+                                                                                            class="btn btn-icon text-primary me-2 fs-2 ni ni-arrow-right-circle-fill border-0"></em>
+                                                                                        <textarea id="context" rows="5"
+                                                                                            class="form-control form-control-lg form-control-plaintext"
+                                                                                            placeholder="Amto provides much better suggestions if it can learn from your writing style and conventions. Please select the part of the contract that you wish to share and click on the Arrow "></textarea>
+                                                                                    </label>
+                                                                                </div>
+
+                                                                                <div class="col- px-0 pb-4">
+                                                                                    <div
+                                                                                        class="form-group border bg-white rounded-3 py-2 px-1">
+                                                                                        <div class="d-flex mb-1">
+                                                                                            <em
+                                                                                                class="icon text-base fs-3 mb-0 me-1 ni ni-note-add-fill"></em>
+                                                                                            <span
+                                                                                                class="fw-bold">Scope</span>
+                                                                                        </div>
+                                                                                        <div role="button"
+                                                                                            id="limitedScope"
+                                                                                            class="badge text-bg-primary text-tracking-1 rounded-pill px-3 py-2 my-1">
+                                                                                            <span>Limited</span>
+                                                                                        </div>
+                                                                                        <div role="button"
+                                                                                            id="comprehensiveScope"
+                                                                                            class="badge text-bg-primary-soft text-tracking-1 rounded-pill px-3 py-2 my-1">
+                                                                                            <span>Comprehensive</span>
+                                                                                        </div>
+                                                                                    </div>
+                                                                                </div>
+
+
+                                                                                <div id="errorPanel"
+                                                                                    class="col-12 text-bg-danger-soft-outline rounded-3 hideMe mb-3 mt-0 mx-0 p-2">
+                                                                                    <span id="errorText">
+                                                                                        This is a error
+                                                                                    </span>
+                                                                                </div>
+                                                                            </div>
+                                                                            <div class="col-12">
+                                                                                <div class="form-group">
+                                                                                    <div role="button" id="run"
+                                                                                        class="btn btn-primary btn-block rounded-pill">
+                                                                                        <span>Generate draft</span>
+                                                                                    </div>
+                                                                                </div>
+                                                                            </div>
+                                                                            <!-- .col -->
+
+                                                                        </div>
+                                                                        <!-- .row -->
+                                                                    </div>
+                                                                </div><!-- .card -->
+                                                            </div>
+                                                        </div>
+                                                    </div><!-- .container -->
+                                                </div>
+                                                <p class="text-center mt-4 mb-6">&copy; 2023 AmtoAI</p>
+
+                                            </main>
+                                        </div>
+                                    </div>
+
+                                </div>
+
+                            </div>
+                        </div>
+                    </div><!-- .section-content -->
+                </div><!-- .container -->
+            </section><!-- .section -->
+        </main>
+        <!-- start page footer -->
+        <footer class="nk-footer">
+            <section class="section bg-darker is-dark section-0">
+                <section class="section bg-darker is-dark section-0">
+                    <div class="container">
+                        <div class="row g-5">
+                            <div class="col-xl-4 col-lg-3 me-auto">
+                                <div class="block-text">
+                                    <a href="index.html" class="logo-link mb-4">
+                                        <div class="logo-wrap">
+                                            <img class="logo-img logo-light" src="images/logo.png"
+                                                srcset="images/logo2x.png 2x" alt="">
+                                            <img class="logo-img logo-dark" src="images/logo-dark.png"
+                                                srcset="images/logo-dark2x.png 2x" alt="">
+                                        </div>
+                                    </a>
+                                    <ul class="btn-list btn-list-inline g-1 mb-3">
+                                        <li><a class="link-base" href="https://in.linkedin.com/company/amtoai"><em
+                                                    class="icon fs-3 ni ni-linkedin-round"></em></a></li>
+                                        <li><a class="link-base" href="https://www.youtube.com/@amto_ai"><em
+                                                    class="icon fs-3 ni ni-youtube-round"></em></a></li>
+                                        <li><a class="link-base" href="https://twitter.com/amto_ai"><em
+                                                    class="icon fs-3 ni ni-twitter-round"></em></a></li>
+                                        <li><a class="link-base"
+                                                href="https://www.facebook.com/profile.php?id=100089681540583"><em
+                                                    class="icon fs-3 ni ni-facebook-fill"></em></a></li>
+                                    </ul>
+                                </div>
+                            </div><!-- .col -->
+                            <div class="col-xl-2 col-lg col-md-3 col-6">
+                                <div class="wgs">
+
+                                </div>
+                            </div><!-- .col -->
+                            <div class="col-xl-2 col-lg col-md-3 col-6">
+                                <div class="wgs">
+
+                                </div>
+                            </div><!-- .col -->
+                            <div class="col-xl-2 col-lg col-md-3 col-6">
+                                <div class="wgs">
+
+                                </div>
+                            </div><!-- .col -->
+                            <div class="col-xl-2 col-lg col-md-3 col-6">
+                                <div class="wgs">
+
+                                </div>
+                            </div><!-- .col -->
+                        </div>
+                    </div><!-- .container -->
+                </section><!-- .section -->
+                <div class="bg-darker is-dark">
+                    <div class="container">
+                        <hr class="border-opacity-25 border-white m-0">
+                        <div class="py-5">
+                            <div class="row">
+                                <div class="col-md">
+                                    <p class="mb-md-0">
+                                        Amto Editor is free software. You can redistribute it and/or modify it under the
+                                        terms of the GNU General Public License as published by the Free Software
+                                        Foundation, either version 2 of the License, or any later version. A copy of the
+                                        source code of this Software is available here (---link to GitHub publishing the
+                                        Code of the page with Commnted Copyright Notice, sent in the next text)
+                                        <br />
+                                        This program is distributed in the hope that it will be useful, but WITHOUT ANY
+                                        WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+                                        PARTICULAR PURPOSE. See the GNU General Public License for more details.
+                                        <br />
+                                        You should have received a copy of the GNU General Public License along with
+                                        this program. If not, see <a
+                                            href="https://www.gnu.org/licenses/">https://www.gnu.org/licenses/</a>.
+
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                        <hr class="border-opacity-25 border-white m-0">
+                        <div class="py-5">
+                            <div class="row">
+                                <div class="col-md">
+                                    <p class="mb-2 mb-md-0">&copy; 2023 Amto.AI </a>.</p>
+                                </div>
+                                <div class="col-md">
+                                    <ul class="list list-row gx-4 justify-content-start justify-content-md-end">
+                                        <li><a href="terms-of-use.html" class="link-light">Terms</a></li>
+                                        <li><a href="privacy-notice.html" class="link-light">Privacy Policy</a></li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+        </footer>
+        <!-- end page footer -->
+    </div>
+
+    <script src="assets/js/bundle.js?v1.1.0"></script>
+    <script src="assets/js/scripts.js?v1.1.0"></script>
+    <script src="assets/js/custom.js"></script>
+    <script src="ckeditor5/build/ckeditor.js"></script>
+
+    <script>DecoupledDocumentEditor
+            .create(document.querySelector('.editor'), {
+
+
+
+
+            })
+            .then(editor => {
+                window.editor = editor;
+
+                // Set a custom container for the toolbar.
+                const toolbarContainer = document.querySelector('.document-editor__toolbar')
+                toolbarContainer.appendChild(editor.ui.view.toolbar.element);
+                document.querySelector('.ck-toolbar').classList.add('ck-reset_all');
+            })
+            .catch(error => {
+                console.error('Oops, something went wrong!');
+                console.error(error);
+            });
+    </script>
+
+    <script>
+        const tempDocument = localStorage.getItem("tempDocument");
+        if (tempDocument) {
+            window.editor.setData(tempDocument);
+            localStorage.removeItem("tempDocument");
+        } else {
+            window.editor.setData("<h3>Please paste your existing document here to experience Contract drafting using the power of ChatGPT.</h3>")
+        }
+    </script>
+
+</body>
+
+</html>
